@@ -216,6 +216,22 @@ func main() {
 	   	"...?timestamp=event_date&format=event_date,timestamp,regex%20(.*),%241%2000:00:00&csvHeaderLine=1"
 	*/
 
+	/*
+
+	   -a Authorization
+	   -f file
+	   -b baseUrl
+	   -t request/data type
+	   	events 			"events/viewer"
+	   	meta-chanmap	"meta/chanmap"
+	   	meta-billing	"meta/billing"
+	   	meta-program_id	"meta/program_id"
+	   	meta-eventmap	"meta/eventmap"
+
+	   -d folder to look for CSV files
+	   -c concurrency
+	*/
+
 	if verbose {
 		printEnv()
 	}
