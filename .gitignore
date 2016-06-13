@@ -1,0 +1,6 @@
+.txt
+*.csv
+*.zip
+tmp/
+numerxdatapusher
+test/*.*
