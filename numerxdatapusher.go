@@ -14,7 +14,7 @@ import (
 )
 
 // Creates a new file upload http request with optional extra params
-func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error) {
+func newfileUploadRequest(uri string, resource string, params map[string]string, paramName, path string) (*http.Request, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -37,16 +37,24 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 	}
 	part.Write(fileContents)
 
-	for key, val := range params {
-		_ = writer.WriteField(key, val)
-	}
 	err = writer.Close()
 	if err != nil {
 		return nil, err
 	}
 
-	request, err := http.NewRequest("POST", uri, body)
+	request, err := http.NewRequest("POST", uri+resource, body)
+
+	values := request.URL.Query()
+	for key, val := range params {
+		values.Add(key, val)
+	}
+
+	request.URL.RawQuery = values.Encode()
+
 	request.Header.Add("Content-Type", writer.FormDataContentType())
+	request.Header.Add("Accept", "application/json")
+	request.Header.Add("Authorization", authorizationKey)
+
 	return request, err
 }
 
@@ -82,14 +90,33 @@ var dataType = [...]DataType{
 	{param_RQ_MetaProgram, RQ_MetaProgram},
 	{param_RQ_MetaEventMap, RQ_MetaEventMap},
 }
-
 var DataTypes map[RQTypeParam]RQType
+
+type KeyValue struct {
+	RQType
+	key string
+}
+
+var keyValue = [...]KeyValue{
+	{RQ_Viewership, ""},
+	{RQ_MetaChanMap, "display_channel_number"},
+	{RQ_MetaBilling, "device_id"},
+	{RQ_MetaProgram, "ID"},
+	{RQ_MetaEventMap, "Event_Type"},
+}
+
+var KeyValues map[RQType]string
 
 func initParams() {
 	DataTypes = make(map[RQTypeParam]RQType)
+	KeyValues = make(map[RQType]string)
 
 	for _, dataType_i := range dataType {
 		DataTypes[dataType_i.RQTypeParam] = dataType_i.RQType
+	}
+
+	for _, keyValue_i := range keyValue {
+		KeyValues[keyValue_i.RQType] = keyValue_i.key
 	}
 }
 
@@ -174,7 +201,9 @@ func main() {
 	   	"...?timestamp=event_date&format=event_date,timestamp,regex%20(.*),%241%2000:00:00&csvHeaderLine=1"
 	*/
 
-	printEnv()
+	if verbose {
+		printEnv()
+	}
 
 	// Get the list of CSV files
 	// For each csv file:
@@ -193,41 +222,93 @@ func main() {
 
 	startTime := time.Now()
 	// This is our semaphore/pool
-	//sem := make(chan bool, concurrency)
+	sem := make(chan bool, concurrency)
 
 	files := getFilesToProcess()
 
 	for _, eachFile := range files {
-		fmt.Println(eachFile)
+		// if we still have available goroutine in the pool (out of concurrency )
+		sem <- true
+
+		// fire one file to be processed in a goroutine
+
+		fmt.Println("About to process: ", eachFile)
+		go func(fileName string) {
+			// Signal end of processing at the end
+			defer func() { <-sem }()
+
+			var extraParams map[string]string = make(map[string]string)
+			var resource string
+
+			switch requestType {
+			case RQ_Viewership:
+				extraParams["timestamp"] = "event_date"
+				extraParams["format"] = "event_date,timestamp,regex%20(.*),%241%2000:00:00"
+				extraParams["csvHeaderLine"] = "1"
+				resource = "/events/viewer"
+
+			case RQ_MetaChanMap:
+				extraParams["key"] = KeyValues[requestType]
+				extraParams["csvHeaderLine"] = "1"
+				resource = "/meta/chanmap"
+
+			case RQ_MetaBilling:
+				extraParams["key"] = KeyValues[requestType]
+				extraParams["csvHeaderLine"] = "1"
+				resource = "/meta/billing"
+
+			case RQ_MetaProgram:
+				extraParams["key"] = KeyValues[requestType]
+				extraParams["csvHeaderLine"] = "1"
+				resource = "/meta/program_id"
+
+			case RQ_MetaEventMap:
+				extraParams["key"] = KeyValues[requestType]
+				extraParams["csvHeaderLine"] = "1"
+				resource = "/meta/eventmap"
+			}
+
+			request, err := newfileUploadRequest(baseUrl, resource, extraParams, "file", eachFile)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if verbose {
+				fmt.Println("RQ URL: ", request.URL)
+				//fmt.Println("RQ: ", request)
+			}
+
+			// TMP - just print the RQ and return from the goroutine
+			return
+
+			client := &http.Client{}
+			resp, err := client.Do(request)
+			if err != nil {
+				log.Fatal(err)
+			} else {
+				var bodyContent []byte
+				fmt.Println(resp.StatusCode)
+				fmt.Println(resp.Header)
+				resp.Body.Read(bodyContent)
+				resp.Body.Close()
+				fmt.Println(bodyContent)
+			}
+
+		}(eachFile)
 	}
+
+	// waiting for all goroutines to end
+	if verbose {
+		fmt.Println("Waiting for all goroutines to complete the work")
+	}
+
+	for i := 0; i < cap(sem); i++ {
+		sem <- true
+	}
+	// Done all gouroutines, close the total channel
 
 	fmt.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
 
-	os.Exit(0)
-
-	path, _ := os.Getwd()
-	path += "/test.pdf"
-	extraParams := map[string]string{
-		"title":       "My Document",
-		"author":      "Matt Aimonetti",
-		"description": "A document with all the Go programming language secrets",
-	}
-	request, err := newfileUploadRequest("https://google.com/upload", extraParams, "file", "/tmp/doc.pdf")
-	if err != nil {
-		log.Fatal(err)
-	}
-	client := &http.Client{}
-	resp, err := client.Do(request)
-	if err != nil {
-		log.Fatal(err)
-	} else {
-		var bodyContent []byte
-		fmt.Println(resp.StatusCode)
-		fmt.Println(resp.Header)
-		resp.Body.Read(bodyContent)
-		resp.Body.Close()
-		fmt.Println(bodyContent)
-	}
 }
 
 // Get the list of files to process in the target folder
