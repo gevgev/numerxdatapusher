@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 )
 
 // Creates a new file upload http request with optional extra params
@@ -173,6 +175,34 @@ func main() {
 	*/
 
 	printEnv()
+
+	// Get the list of CSV files
+	// For each csv file:
+	// 		Build the request
+	// 		POST the request
+	// 		Get the Id from response if 200 Ok
+	// 		Start a goroutine for Id check
+	// 			Inside goroutine:
+	// 				sleep(nnn)
+	// 				Check the status for [“step”=”metaindexstatus”, “status”=”success”]
+	//								  or [“step”=“eventindexstatus”, “status” = “success”]
+	//				if complete ==> exit with an indication of success
+	// End for each csv file
+	// Wait for all goroutines to end
+	// End the app
+
+	startTime := time.Now()
+	// This is our semaphore/pool
+	//sem := make(chan bool, concurrency)
+
+	files := getFilesToProcess()
+
+	for _, eachFile := range files {
+		fmt.Println(eachFile)
+	}
+
+	fmt.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
+
 	os.Exit(0)
 
 	path, _ := os.Getwd()
@@ -198,4 +228,43 @@ func main() {
 		resp.Body.Close()
 		fmt.Println(bodyContent)
 	}
+}
+
+// Get the list of files to process in the target folder
+func getFilesToProcess() []string {
+	fileList := []string{}
+	singleFileMode = false
+
+	if dirName == "" {
+		if inFileName != "" {
+			// no Dir name provided, but file name provided =>
+			// Single file mode
+			singleFileMode = true
+			fileList = append(fileList, inFileName)
+			return fileList
+		} else {
+			// no Dir name, no file name
+			fmt.Println("Input file name or working directory is not provided")
+			usage()
+		}
+	}
+
+	// We have working directory - takes over single file name, if both provided
+	err := filepath.Walk(dirName, func(path string, f os.FileInfo, _ error) error {
+		if isCsvFile(path) {
+			fileList = append(fileList, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		fmt.Println("Error getting files list: ", err)
+		os.Exit(-1)
+	}
+
+	return fileList
+}
+
+func isCsvFile(fileName string) bool {
+	return filepath.Ext(fileName) == "."+csvExt
 }
