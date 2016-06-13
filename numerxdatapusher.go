@@ -61,11 +61,11 @@ func newfileUploadRequest(uri string, resource string, params map[string]string,
 type RQType string
 
 const (
-	RQ_Viewership   RQType = "events/viewer"
-	RQ_MetaChanMap  RQType = "meta/chanmap"
-	RQ_MetaBilling  RQType = "meta/billing"
-	RQ_MetaProgram  RQType = "meta/program_id"
-	RQ_MetaEventMap RQType = "meta/eventmap"
+	RQ_Viewership   RQType = "/events/viewer"
+	RQ_MetaChanMap  RQType = "/meta/chanmap"
+	RQ_MetaBilling  RQType = "/meta/billing"
+	RQ_MetaProgram  RQType = "/meta/program_id"
+	RQ_MetaEventMap RQType = "/meta/eventmap"
 )
 
 type RQTypeParam string
@@ -124,6 +124,7 @@ var (
 	authorizationKey string
 	baseUrl          string
 	requestType      RQType
+	param_RQ_T       string
 	inFileName       string
 	dirName          string
 	concurrency      int
@@ -152,7 +153,8 @@ func init() {
 	if flag.Parsed() {
 		authorizationKey = *flagAuthorization
 		baseUrl = *flagBaseUrl
-		requestType = DataTypes[RQTypeParam(*flagRQType)]
+		param_RQ_T = *flagRQType
+		requestType = DataTypes[RQTypeParam(param_RQ_T)]
 		inFileName = *flagFileName
 		dirName = *flagDirName
 		concurrency = *flagConcurrency
@@ -188,6 +190,19 @@ func printEnv() {
 	)
 }
 
+func ValidateRQType() bool {
+	if requestType == "" {
+		fmt.Println("Wrong request type parameter value provided: ", param_RQ_T)
+		fmt.Println("Valid values are:")
+		for _, rq_type := range dataType {
+			fmt.Println(rq_type.RQTypeParam)
+		}
+		return false
+	}
+
+	return true
+}
+
 func main() {
 
 	/*
@@ -203,6 +218,10 @@ func main() {
 
 	if verbose {
 		printEnv()
+	}
+
+	if !ValidateRQType() {
+		os.Exit(-1)
 	}
 
 	// Get the list of CSV files
@@ -238,43 +257,29 @@ func main() {
 			defer func() { <-sem }()
 
 			var extraParams map[string]string = make(map[string]string)
-			var resource string
 
 			switch requestType {
 			case RQ_Viewership:
 				extraParams["timestamp"] = "event_date"
 				extraParams["format"] = "event_date,timestamp,regex%20(.*),%241%2000:00:00"
 				extraParams["csvHeaderLine"] = "1"
-				resource = "/events/viewer"
 
 			case RQ_MetaChanMap:
-				extraParams["key"] = KeyValues[requestType]
-				extraParams["csvHeaderLine"] = "1"
-				resource = "/meta/chanmap"
-
 			case RQ_MetaBilling:
-				extraParams["key"] = KeyValues[requestType]
-				extraParams["csvHeaderLine"] = "1"
-				resource = "/meta/billing"
-
 			case RQ_MetaProgram:
-				extraParams["key"] = KeyValues[requestType]
-				extraParams["csvHeaderLine"] = "1"
-				resource = "/meta/program_id"
-
 			case RQ_MetaEventMap:
 				extraParams["key"] = KeyValues[requestType]
 				extraParams["csvHeaderLine"] = "1"
-				resource = "/meta/eventmap"
 			}
 
-			request, err := newfileUploadRequest(baseUrl, resource, extraParams, "file", eachFile)
+			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, "file", eachFile)
 			if err != nil {
 				log.Fatal(err)
 			}
 
 			if verbose {
 				fmt.Println("RQ URL: ", request.URL)
+				fmt.Println("Headers: ", request.Header)
 				//fmt.Println("RQ: ", request)
 			}
 
