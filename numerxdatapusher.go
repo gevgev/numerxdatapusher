@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -10,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -35,7 +38,10 @@ func newfileUploadRequest(uri string, resource string, params map[string]string,
 	if err != nil {
 		return nil, err
 	}
+
 	part.Write(fileContents)
+
+	writer.WriteField("type", "type=text/csv")
 
 	err = writer.Close()
 	if err != nil {
@@ -51,11 +57,34 @@ func newfileUploadRequest(uri string, resource string, params map[string]string,
 
 	request.URL.RawQuery = values.Encode()
 
+	request.Header.Add("Accept", "application/json")
+	request.Header.Add("Authorization", authorizationKey)
 	request.Header.Add("Content-Type", writer.FormDataContentType())
+	//request.Header.Add("Content-Type", "multipart/form-data")
+
+	return request, err
+}
+
+// Creates a new GET http request to check the status of previously submitted (through POST) file processing jobs
+func fileUploadStatusRequest(uri string, resource string, params map[string]string) (*http.Request, error) {
+
+	request, err := http.NewRequest("GET", uri+resource, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	values := request.URL.Query()
+	for key, val := range params {
+		values.Add(key, val)
+	}
+
+	request.URL.RawQuery = values.Encode()
+
+	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Accept", "application/json")
 	request.Header.Add("Authorization", authorizationKey)
 
-	return request, err
+	return request, nil
 }
 
 type RQType string
@@ -131,11 +160,13 @@ var (
 	verbose          bool
 	singleFileMode   bool
 	appName          string
+	timeout          time.Duration
 )
 
 const (
 	version = "0.9"
 	csvExt  = "csv"
+	TIMEOUT = 1
 )
 
 func init() {
@@ -147,7 +178,8 @@ func init() {
 	flagFileName := flag.String("f", "", "Input `filename` to process")
 	flagDirName := flag.String("d", "", "Working `directory` for input files, default extension *.csv")
 	flagConcurrency := flag.Int("c", 20, "The number of files to process `concurrent`ly")
-	flagVerbose := flag.Bool("v", false, "`Verbose`: outputs to the screen")
+	flagVerbose := flag.Bool("v", true, "`Verbose`: outputs to the screen")
+	flagTimeout := flag.Int("s", TIMEOUT, "`Sleep time` in minutes")
 
 	flag.Parse()
 	if flag.Parsed() {
@@ -159,6 +191,7 @@ func init() {
 		dirName = *flagDirName
 		concurrency = *flagConcurrency
 		verbose = *flagVerbose
+		timeout = time.Duration(*flagTimeout)
 		appName = os.Args[0]
 		if inFileName == "" && dirName == "" && len(os.Args) == 2 {
 			inFileName = os.Args[1]
@@ -172,20 +205,21 @@ func init() {
 func usage() {
 	fmt.Printf("%s, ver. %s\n", appName, version)
 	fmt.Println("Command line:")
-	fmt.Printf("\tprompt$>%s -a <auth_key> -b <base_url> -t <request-type> [-f <filename> OR -d <dir>] -v \n", appName)
+	fmt.Printf("\tprompt$>%s -a <auth_key> -b <base_url> -t <request-type> [-f <filename> OR -d <dir>] -s <minutes> -v \n", appName)
 	fmt.Println("Provide either file or dir. Dir takes over file, if both provided")
 	flag.Usage()
 	os.Exit(-1)
 }
 
 func printEnv() {
-	fmt.Printf("Provided: -a: %s, -b: %s, -r: %v, -f: %s, -d: %s, -c: %v, -v: %v \n",
+	fmt.Printf("Provided: -a: %s, -b: %s, -r: %v, -f: %s, -d: %s, -c: %v, -s: %v, -v: %v \n",
 		authorizationKey,
 		baseUrl,
 		requestType,
 		inFileName,
 		dirName,
 		concurrency,
+		timeout,
 		verbose,
 	)
 }
@@ -201,6 +235,115 @@ func ValidateRQType() bool {
 	}
 
 	return true
+}
+
+// Check status for a job
+func jobCompleted(id string) bool {
+	// Call numerxData server to check the status of this job
+	// return true if we get:
+	// 		[“step”=”metaindexstatus”, “status”=”success”]
+	//	or [“step”=“eventindexstatus”, “status” = “success”]
+	/*
+		[
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"metaindexstatus","Status":"success","Timestamp":1465589455508,"Notes":""},
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"parsedmeta","Status":"success","Timestamp":1465588843502,"Notes":""},
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"rawmeta","Status":"success","Timestamp":1465588543502,"Notes":""}
+		]
+	*/
+	// uri string, resource string, params map[string]string
+	var params map[string]string = make(map[string]string)
+	params["id"] = id
+	request, err := fileUploadStatusRequest(baseUrl, string(requestType), params)
+	if err != nil {
+		log.Println(err)
+	}
+
+	if verbose {
+		fmt.Println("RQ URL: ", request.URL)
+		fmt.Println("RQ Headers: ", request.Header)
+		fmt.Println("RQ Body: ", request)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		log.Println(err)
+	} else {
+		/* JSON
+		[
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"metaindexstatus","Status":"success","Timestamp":1465589455508,"Notes":""},
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"parsedmeta","Status":"success","Timestamp":1465588843502,"Notes":""},
+			{"ID":"0.0.LqO~iOvJV3sdUOd8","Step":"rawmeta","Status":"success","Timestamp":1465588543502,"Notes":""}
+		]
+		*/
+
+		var bodyContent []byte
+		if verbose {
+			fmt.Println("Status RS Status: ", resp.StatusCode)
+			fmt.Println("Status RS Headers: ", resp.Header)
+		}
+		n, err := resp.Body.Read(bodyContent)
+		resp.Body.Close()
+
+		if verbose {
+			fmt.Println("Status RS Content: read bytes: ", n)
+			fmt.Println("Status RS Content: error? :", err)
+			fmt.Println("Status RS Content: body: ", bodyContent)
+		}
+		if resp.StatusCode == 200 {
+			// Check the step's status
+			status, err := getStatusResponse(bodyContent)
+			if err != nil {
+				fmt.Printf("Error %v while checking status for %v \n", err, id)
+			} else {
+				switch requestType {
+				case RQ_Viewership:
+					for _, entry := range status {
+						if entry.Step == "eventindexstatus" {
+							if entry.Status == "success" {
+								return true
+							} else {
+								break
+							}
+						}
+					}
+				case RQ_MetaBilling:
+				case RQ_MetaProgram:
+				case RQ_MetaChanMap:
+				case RQ_MetaEventMap:
+					for _, entry := range status {
+						if entry.Step == "metaindexstatus" {
+							if entry.Status == "success" {
+								return true
+							} else {
+								break
+							}
+						}
+					}
+				}
+			}
+		} else {
+			log.Println("Error Status %v while checking status for %v \n", err, id)
+			if verbose {
+				fmt.Println("Error Status %v while checking status for %v \n", err, id)
+			}
+		}
+	}
+
+	return false
+}
+
+// General loop-function to wait for a job to complete on numerx side
+func waitingForJob(id string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		// wait enough...
+		time.Sleep(timeout * time.Minute)
+		// Check if the numerx server has completed this job yet
+		if jobCompleted(id) {
+			return
+		}
+	}
 }
 
 func main() {
@@ -240,24 +383,52 @@ func main() {
 		os.Exit(-1)
 	}
 
-	// Get the list of CSV files
-	// For each csv file:
-	// 		Build the request
-	// 		POST the request
-	// 		Get the Id from response if 200 Ok
-	// 		Start a goroutine for Id check
-	// 			Inside goroutine:
-	// 				sleep(nnn)
-	// 				Check the status for [“step”=”metaindexstatus”, “status”=”success”]
-	//								  or [“step”=“eventindexstatus”, “status” = “success”]
-	//				if complete ==> exit with an indication of success
-	// End for each csv file
-	// Wait for all goroutines to end
-	// End the app
+	/*
+		// Get the list of CSV files
+		// For each csv file:
+		// 		Build the request
+		// 		POST the request
+		// 		Get the Id from response if 200 Ok
+		// 		Start a goroutine for Id check
+		// 			Inside goroutine:
+		// 				sleep(nnn)
+		// 				Check the status for [“step”=”metaindexstatus”, “status”=”success”]
+		//								  or [“step”=“eventindexstatus”, “status” = “success”]
+		//				if complete ==> exit with an indication of success
+		// End for each csv file
+		// Wait for all goroutines to end
+		// End the app
+	*/
 
 	startTime := time.Now()
 	// This is our semaphore/pool
 	sem := make(chan bool, concurrency)
+
+	jobsInProcessChann := make(chan string, concurrency)
+
+	var wg sync.WaitGroup
+
+	// Start listening for the job Ids
+	go func() {
+		if verbose {
+			fmt.Println("Ready to start getting Ids to wait for completeion...")
+		}
+		for {
+			nextJobId, more := <-jobsInProcessChann
+			if more {
+				if verbose {
+					fmt.Println("Starting waiting for: ", nextJobId)
+				}
+				wg.Add(1)
+				go waitingForJob(nextJobId, &wg)
+			} else {
+				if verbose {
+					fmt.Println("Got all Ids, breaking")
+				}
+				return
+			}
+		}
+	}()
 
 	files := getFilesToProcess()
 
@@ -290,29 +461,51 @@ func main() {
 
 			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, "file", eachFile)
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			}
 
 			if verbose {
-				fmt.Println("RQ URL: ", request.URL)
-				fmt.Println("Headers: ", request.Header)
-				//fmt.Println("RQ: ", request)
+				fmt.Println("POST RQ URL: ", request.URL)
+				fmt.Println("POST RQ Headers: ", request.Header)
+				fmt.Println("POST RQ Body: ", request)
 			}
-
-			// TMP - just print the RQ and return from the goroutine
-			return
 
 			client := &http.Client{}
 			resp, err := client.Do(request)
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			} else {
+				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
+
 				var bodyContent []byte
-				fmt.Println(resp.StatusCode)
-				fmt.Println(resp.Header)
-				resp.Body.Read(bodyContent)
+				if verbose {
+					fmt.Println("POST Status code: ", resp.StatusCode)
+					fmt.Println("POST Headers: ", resp.Header)
+				}
+				n, err := resp.Body.Read(bodyContent)
 				resp.Body.Close()
-				fmt.Println(bodyContent)
+
+				if verbose {
+					fmt.Printf("POST - File:[%s] Response body: [%s]\n", eachFile, string(bodyContent))
+					fmt.Println("POST - Status RS Content: read bytes: ", n)
+					fmt.Println("POST - Status RS Content: error? :", err)
+					fmt.Println("POST - Status RS Content: body: ", bodyContent)
+				}
+				if resp.StatusCode == 200 {
+					// get the id of the job on numerX server
+					// sent this Id to the StatusChecker channel
+					jobId, err := GetJobId(bodyContent)
+					if err != nil {
+						fmt.Printf("Error [%v] for submitting %v \n", err, eachFile)
+					} else {
+						jobsInProcessChann <- jobId
+					}
+				} else {
+					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
+					if verbose {
+						fmt.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
+					}
+				}
 			}
 
 		}(eachFile)
@@ -326,10 +519,52 @@ func main() {
 	for i := 0; i < cap(sem); i++ {
 		sem <- true
 	}
-	// Done all gouroutines, close the total channel
+	// Done all gouroutines, close the jobs listener channel
+
+	close(jobsInProcessChann)
+
+	// Now waiting for status-waiter processes to end
+	wg.Wait()
 
 	fmt.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
 
+}
+
+type NumerXPOSTResponse struct {
+	Id string `json:"id"`
+}
+
+type NumerXStatusResponse struct {
+	ID        string
+	Step      string
+	Status    string
+	Timestamp string
+	Notes     string
+}
+
+// Unmarshal Status response to []NumerXStatusResponse
+func getStatusResponse(bodyContent []byte) ([]NumerXStatusResponse, error) {
+	var response []NumerXStatusResponse
+	err := json.Unmarshal(bodyContent, &response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+// Unmarshall POST response to job Id
+func GetJobId(bodyContent []byte) (string, error) {
+	var response []NumerXPOSTResponse
+	err := json.Unmarshal(bodyContent, &response)
+	if err != nil {
+		return "", err
+	}
+
+	if len(response) == 0 {
+		return "", errors.New("No Id found in response")
+	}
+
+	return response[0].Id, nil
 }
 
 // Get the list of files to process in the target folder
