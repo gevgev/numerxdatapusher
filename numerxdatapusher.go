@@ -16,7 +16,7 @@ import (
 )
 
 // Creates a new file upload http request with optional extra params
-func newfileUploadRequest(uri string, resource string, params map[string]string, paramName, path string) (*http.Request, error) {
+func newfileUploadRequest(uri string, resource string, params map[string]string, path string) (*http.Request, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -471,7 +471,7 @@ func main() {
 				extraParams["csvHeaderLine"] = "1"
 			}
 
-			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, "file", eachFile)
+			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, eachFile)
 			if err != nil {
 				log.Println(err)
 			}
