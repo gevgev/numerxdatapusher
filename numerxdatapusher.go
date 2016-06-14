@@ -41,8 +41,6 @@ func newfileUploadRequest(uri string, resource string, params map[string]string,
 
 	part.Write(fileContents)
 
-	writer.WriteField("type", "type=text/csv")
-
 	err = writer.Close()
 	if err != nil {
 		return nil, err
