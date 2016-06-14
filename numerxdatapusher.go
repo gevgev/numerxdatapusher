@@ -460,7 +460,7 @@ func main() {
 			switch requestType {
 			case RQ_Viewership:
 				extraParams["timestamp"] = "event_date"
-				extraParams["format"] = "event_date,timestamp,regex%20(.*),%241%2000:00:00"
+				extraParams["format"] = "event_date,timestamp,regex (.*),$1 00:00:00" //"event_date,timestamp,regex%20(.*),%241%2000:00:00"
 				extraParams["csvHeaderLine"] = "1"
 
 			case RQ_MetaChanMap:
