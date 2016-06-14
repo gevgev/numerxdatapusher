@@ -474,6 +474,8 @@ func main() {
 			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, eachFile)
 			if err != nil {
 				log.Println(err)
+				wg.Done()
+				return
 			}
 
 			if verbose {
@@ -486,6 +488,8 @@ func main() {
 			resp, err := client.Do(request)
 			if err != nil {
 				log.Println(err)
+				wg.Done()
+				return
 			} else {
 				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
 				defer resp.Body.Close()
@@ -519,6 +523,8 @@ func main() {
 					if verbose {
 						fmt.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					}
+					wg.Done()
+					return
 				}
 			}
 
@@ -533,12 +539,12 @@ func main() {
 	for i := 0; i < cap(sem); i++ {
 		sem <- true
 	}
-	// Done all gouroutines, close the jobs listener channel
 
 	// Now waiting for status-waiter processes to end
 	fmt.Println("Waiting for all status checks to complete")
 	wg.Wait()
 
+	// Done all gouroutines, close the jobs listener channel
 	fmt.Println("Initial POST files complete, closing jobs processing channel")
 	close(jobsInProcessChann)
 
