@@ -564,8 +564,8 @@ type NumerXStatusResponse struct {
 func getStatusResponse(bodyContent []byte) ([]NumerXStatusResponse, error) {
 	var response []NumerXStatusResponse
 	if verbose {
-		fmt.Println("Post response: Bytes:  ", bodyContent)
-		fmt.Println("Post response: String: ", string(bodyContent))
+		fmt.Println("Status response: Bytes:  ", bodyContent)
+		fmt.Println("Status response: String: ", string(bodyContent))
 	}
 	err := json.Unmarshal(bodyContent, &response)
 	if err != nil {
