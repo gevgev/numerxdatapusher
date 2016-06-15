@@ -268,7 +268,6 @@ func jobCompleted(id string) bool {
 		}
 
 		bodyContent, err := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
 
 		if verbose {
 			fmt.Println("Status RS Content: error? :", err)
@@ -499,7 +498,6 @@ func main() {
 					fmt.Println("POST Headers: ", resp.Header)
 				}
 				bodyContent, err := ioutil.ReadAll(resp.Body)
-				resp.Body.Close()
 
 				if verbose {
 					fmt.Printf("POST - File:[%s] Response body: %s\n", eachFile, string(bodyContent))
