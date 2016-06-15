@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	//"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -142,14 +141,16 @@ var (
 	concurrency      int
 	verbose          bool
 	singleFileMode   bool
+	retryNumber      int
 	appName          string
 	timeout          time.Duration
 )
 
 const (
-	version = "0.9"
-	csvExt  = "csv"
-	TIMEOUT = 1
+	version       = "0.9"
+	csvExt        = "csv"
+	TIMEOUT       = 1
+	RETRY_DEFAULT = 3
 )
 
 func init() {
@@ -163,6 +164,7 @@ func init() {
 	flagConcurrency := flag.Int("c", 20, "The number of files to process `concurrent`ly")
 	flagVerbose := flag.Bool("v", true, "`Verbose`: outputs to the screen")
 	flagTimeout := flag.Int("s", TIMEOUT, "`Sleep time` in minutes")
+	flagRetryNumber := flag.Int("r", RETRY_DEFAULT, "`Retry` number")
 
 	flag.Parse()
 	if flag.Parsed() {
@@ -175,6 +177,8 @@ func init() {
 		concurrency = *flagConcurrency
 		verbose = *flagVerbose
 		timeout = time.Duration(*flagTimeout)
+		retryNumber = *flagRetryNumber
+
 		appName = os.Args[0]
 		if inFileName == "" && dirName == "" && len(os.Args) == 2 {
 			inFileName = os.Args[1]
@@ -220,8 +224,46 @@ func ValidateRQType() bool {
 	return true
 }
 
+type StatusType string
+
+const (
+	Success StatusType = "success"
+	Failure StatusType = "failure"
+)
+
+type EventProcessingSteps string
+
+const (
+	RawEventData    EventProcessingSteps = "rawevent"
+	ParsedEventData EventProcessingSteps = "parsedevent"
+	IndexEventData  EventProcessingSteps = "eventindexstatus"
+)
+
+type MetaProcessingSteps string
+
+const (
+	RawMetaData    EventProcessingSteps = "rawmeta"
+	ParsedMetaData EventProcessingSteps = "parsedmeta"
+	IndexMetaData  EventProcessingSteps = "metaindexstatus"
+)
+
+type JobType struct {
+	JobId    string
+	Filename string
+	RetryNum int
+}
+
+func RetryJob(job JobType) {
+	if job.RetryNum > 0 {
+		job.RetryNum--
+		jobsInProcessChann <- job
+	} else {
+		failedJobsChan <- job
+	}
+}
+
 // Check status for a job
-func jobCompleted(id string) bool {
+func jobCompleted(job JobType) bool {
 	// Call numerxData server to check the status of this job
 	// return true if we get:
 	// 		[“step”=”metaindexstatus”, “status”=”success”]
@@ -235,7 +277,7 @@ func jobCompleted(id string) bool {
 	*/
 	// uri string, resource string, params map[string]string
 	var params map[string]string = make(map[string]string)
-	params["id"] = id
+	params["id"] = job.JobId
 	request, err := fileUploadStatusRequest(baseUrl, "/status", params)
 	if err != nil {
 		log.Println(err)
@@ -278,20 +320,29 @@ func jobCompleted(id string) bool {
 			// Check the step's status
 			status, err := getStatusResponse(bodyContent)
 			if err != nil {
-				fmt.Printf("Error %v while checking status for %v \n", err, id)
+				fmt.Printf("Error %v while checking status for %v, file: %v \n", err, job.JobId, job.Filename)
 			} else {
 				switch requestType {
 				case RQ_Viewership:
 					for _, entry := range status {
-						if entry.Step == "eventindexstatus" {
-							if entry.Status == "success" {
+						switch entry.Step {
+						case string(IndexEventData): // "eventindexstatus":
+							switch entry.Status {
+							case string(Success): // "success":
 								if verbose {
 									fmt.Println("@", time.Now())
-									fmt.Println("Complete for: ", id)
+									fmt.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
 									fmt.Println("Current state: ", status)
 								}
 								return true
-							} else {
+							case string(Failure): // "failure":
+								RetryJob(job)
+								break
+							}
+						case string(ParsedEventData):
+						case string(RawEventData):
+							if entry.Status == string(Failure) {
+								RetryJob(job)
 								break
 							}
 						}
@@ -299,24 +350,35 @@ func jobCompleted(id string) bool {
 
 					if verbose {
 						fmt.Println("@", time.Now())
-						fmt.Println("Not yet: ", id)
+						fmt.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
 						fmt.Println("Current state: ", status)
 					}
 
+				// TODO: convert below simila to Events above and add retryChan <-id
+				//	(actually the new struct with file-name, id, and retry-number)
 				case RQ_MetaBilling:
 				case RQ_MetaProgram:
 				case RQ_MetaChanMap:
 				case RQ_MetaEventMap:
 					for _, entry := range status {
-						if entry.Step == "metaindexstatus" {
-							if entry.Status == "success" {
+						switch entry.Step {
+						case string(IndexMetaData): // "metaindexstatus":
+							switch entry.Status {
+							case string(Success): // "success":
 								if verbose {
 									fmt.Println("@", time.Now())
-									fmt.Println("Complete for: ", id)
+									fmt.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
 									fmt.Println("Current state: ", status)
 								}
 								return true
-							} else {
+							case string(Failure): // "failure":
+								RetryJob(job)
+								break
+							}
+						case string(ParsedMetaData):
+						case string(RawMetaData):
+							if entry.Status == string(Failure) {
+								RetryJob(job)
 								break
 							}
 						}
@@ -324,16 +386,17 @@ func jobCompleted(id string) bool {
 
 					if verbose {
 						fmt.Println("@", time.Now())
-						fmt.Println("Not yet: ", id)
+						fmt.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
 						fmt.Println("Current state: ", status)
 					}
 
 				}
 			}
 		} else {
-			log.Println("Error Status %v while checking status for %v \n", err, id)
+			log.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
+			failedJobsChan <- job
 			if verbose {
-				fmt.Println("Error Status %v while checking status for %v \n", err, id)
+				fmt.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
 			}
 		}
 	}
@@ -342,20 +405,23 @@ func jobCompleted(id string) bool {
 }
 
 // General loop-function to wait for a job to complete on numerx side
-func waitingForJob(id string, wg *sync.WaitGroup) {
+func waitingForJob(job JobType, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		// wait enough...
 		if verbose {
-			fmt.Println("Waiting for ", id)
+			fmt.Println("Waiting for ", job.JobId)
 		}
 		time.Sleep(timeout * time.Minute)
 		// Check if the numerx server has completed this job yet
-		if jobCompleted(id) {
+		if jobCompleted(job) {
 			return
 		}
 	}
 }
+
+var jobsInProcessChann chan JobType
+var failedJobsChan chan JobType
 
 func main() {
 
@@ -415,9 +481,34 @@ func main() {
 	// This is our semaphore/pool
 	sem := make(chan bool, concurrency)
 
-	jobsInProcessChann := make(chan string, concurrency)
+	jobsInProcessChann = make(chan JobType, concurrency)
+	failedJobsChan = make(chan JobType)
+
+	var failedJobs []JobType
+	failedJobs = make([]JobType, 0)
 
 	var wg sync.WaitGroup
+
+	// Start listening for failed jobs
+	go func() {
+		if verbose {
+			fmt.Println("Ready to start getting Ids to wait for completeion...")
+		}
+		for {
+			nextFailedJob, more := <-failedJobsChan
+			if more {
+				if verbose {
+					fmt.Println("Got failed job: ", nextFailedJob)
+					failedJobs = append(failedJobs, nextFailedJob)
+				}
+			} else {
+				if verbose {
+					fmt.Println("Got all Failed Jobs, breaking")
+				}
+				return
+			}
+		}
+	}()
 
 	// Start listening for the job Ids
 	go func() {
@@ -425,12 +516,12 @@ func main() {
 			fmt.Println("Ready to start getting Ids to wait for completeion...")
 		}
 		for {
-			nextJobId, more := <-jobsInProcessChann
+			nextJob, more := <-jobsInProcessChann
 			if more {
 				if verbose {
-					fmt.Println("Starting waiting for: ", nextJobId)
+					fmt.Println("Starting waiting for: ", nextJob.JobId)
 				}
-				go waitingForJob(nextJobId, &wg)
+				go waitingForJob(nextJob, &wg)
 			} else {
 				if verbose {
 					fmt.Println("Got all Ids, breaking")
@@ -514,7 +605,16 @@ func main() {
 						if verbose {
 							fmt.Printf("Posted file [%s] with Id {%s}, about to start checking on status update\n", eachFile, jobId)
 						}
-						jobsInProcessChann <- jobId
+
+						newJob := JobType{
+							JobId:    jobId,
+							Filename: eachFile,
+							RetryNum: retryNumber,
+						}
+						//	JobId : jobId
+						//	FileName:
+						//}
+						jobsInProcessChann <- newJob
 					}
 				} else {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
@@ -546,10 +646,25 @@ func main() {
 	fmt.Println("Initial POST files complete, closing jobs processing channel")
 	close(jobsInProcessChann)
 
+	// Done all gouroutines, close the failed jobs listener channel
+	fmt.Println("Initial POST files complete, closing jobs processing channel")
+	close(failedJobsChan)
+
 	fmt.Println("jobs channel closed")
 
 	fmt.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
 
+	if len(failedJobs) > 0 {
+		PrintFailedJobs(failedJobs)
+	} else {
+		fmt.Println("No failed jobs reported")
+	}
+}
+
+func PrintFailedJobs(failedJobs []JobType) {
+	for _, job := range failedJobs {
+		fmt.Printf("Failed job: [%s], file: %s\n", job.JobId, job.Filename)
+	}
 }
 
 type NumerXPOSTResponse struct {
