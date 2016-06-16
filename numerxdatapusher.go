@@ -229,7 +229,7 @@ type StatusType string
 
 const (
 	Success StatusType = "success"
-	Failure StatusType = "failure"
+	Failure StatusType = "failed"
 )
 
 type EventProcessingSteps string
@@ -329,12 +329,12 @@ func jobCompleted(job JobType) bool {
 								return true
 							case string(Failure): // "failure":
 								failedJobsChan <- job
-								break
+								return true
 							}
 						case string(ParsedEventData), string(RawEventData):
 							if entry.Status == string(Failure) {
 								failedJobsChan <- job
-								break
+								return true
 							}
 						}
 					}
@@ -360,12 +360,12 @@ func jobCompleted(job JobType) bool {
 								return true
 							case string(Failure): // "failure":
 								failedJobsChan <- job
-								break
+								return true
 							}
 						case string(ParsedMetaData), string(RawMetaData):
 							if entry.Status == string(Failure) {
 								failedJobsChan <- job
-								break
+								return true
 							}
 						}
 					}
@@ -384,6 +384,7 @@ func jobCompleted(job JobType) bool {
 			if verbose {
 				fmt.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
 			}
+			return true
 		}
 	}
 
@@ -611,7 +612,13 @@ func main() {
 					}
 				} else if resp.StatusCode == 500 {
 					// TODO: if 500 - re POST
-
+					failedJobsChan <- JobType{
+						JobId:    "",
+						Filename: eachFile,
+						RetryNum: -1,
+					}
+					wg.Done()
+					return
 				} else {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					if verbose {
