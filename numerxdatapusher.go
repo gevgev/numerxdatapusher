@@ -256,6 +256,7 @@ type JobType struct {
 func RetryJob(job JobType) {
 	if job.RetryNum > 0 {
 		job.RetryNum--
+		// TODO - re-POST this file do not just re-check!!!
 		jobsInProcessChann <- job
 	} else {
 		failedJobsChan <- job
@@ -571,6 +572,7 @@ func main() {
 			if err != nil {
 				log.Println(err)
 				wg.Done()
+				// TODO - report failed id-less job
 				return
 			} else {
 				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
