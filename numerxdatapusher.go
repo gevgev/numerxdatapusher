@@ -559,6 +559,11 @@ func main() {
 			if err != nil {
 				log.Println(err)
 				wg.Done()
+				failedJobsChan <- JobType{
+					JobId:    "",
+					Filename: eachFile,
+					RetryNum: -1,
+				}
 				return
 			}
 
@@ -619,6 +624,11 @@ func main() {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					if verbose {
 						fmt.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
+					}
+					failedJobsChan <- JobType{
+						JobId:    "",
+						Filename: eachFile,
+						RetryNum: -1,
 					}
 					wg.Done()
 					return
