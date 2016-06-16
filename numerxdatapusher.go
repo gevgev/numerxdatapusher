@@ -415,6 +415,7 @@ func waitingForJob(job JobType, wg *sync.WaitGroup) {
 	}
 }
 
+var filesQueueChan chan string
 var jobsInProcessChann chan JobType
 var failedJobsChan chan JobType
 
@@ -476,6 +477,7 @@ func main() {
 	// This is our semaphore/pool
 	sem := make(chan bool, concurrency)
 
+	filesQueueChan = make(chan string, concurrency)
 	jobsInProcessChann = make(chan JobType, concurrency)
 	failedJobsChan = make(chan JobType)
 
@@ -571,7 +573,11 @@ func main() {
 			if err != nil {
 				log.Println(err)
 				wg.Done()
-				// TODO - report failed id-less job
+				failedJobsChan <- JobType{
+					JobId:    "",
+					Filename: eachFile,
+					RetryNum: -1,
+				}
 				return
 			} else {
 				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
