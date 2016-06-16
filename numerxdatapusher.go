@@ -339,8 +339,7 @@ func jobCompleted(job JobType) bool {
 								RetryJob(job)
 								break
 							}
-						case string(ParsedEventData):
-						case string(RawEventData):
+						case string(ParsedEventData), string(RawEventData):
 							if entry.Status == string(Failure) {
 								RetryJob(job)
 								break
@@ -356,10 +355,7 @@ func jobCompleted(job JobType) bool {
 
 				// TODO: convert below simila to Events above and add retryChan <-id
 				//	(actually the new struct with file-name, id, and retry-number)
-				case RQ_MetaBilling:
-				case RQ_MetaProgram:
-				case RQ_MetaChanMap:
-				case RQ_MetaEventMap:
+				case RQ_MetaBilling, RQ_MetaProgram, RQ_MetaChanMap, RQ_MetaEventMap:
 					for _, entry := range status {
 						switch entry.Step {
 						case string(IndexMetaData): // "metaindexstatus":
@@ -375,8 +371,7 @@ func jobCompleted(job JobType) bool {
 								RetryJob(job)
 								break
 							}
-						case string(ParsedMetaData):
-						case string(RawMetaData):
+						case string(ParsedMetaData), string(RawMetaData):
 							if entry.Status == string(Failure) {
 								RetryJob(job)
 								break
@@ -553,10 +548,7 @@ func main() {
 				extraParams["format"] = "event_date,timestamp,regex (.*),$1 00:00:00" //"event_date,timestamp,regex%20(.*),%241%2000:00:00"
 				extraParams["csvHeaderLine"] = "1"
 
-			case RQ_MetaChanMap:
-			case RQ_MetaBilling:
-			case RQ_MetaProgram:
-			case RQ_MetaEventMap:
+			case RQ_MetaChanMap, RQ_MetaBilling, RQ_MetaProgram, RQ_MetaEventMap:
 				extraParams["key"] = KeyValues[requestType]
 				extraParams["csvHeaderLine"] = "1"
 			}
