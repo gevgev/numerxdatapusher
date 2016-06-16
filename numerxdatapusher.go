@@ -354,7 +354,6 @@ func jobCompleted(job JobType) bool {
 						fmt.Println("Current state: ", status)
 					}
 
-				// TODO: convert below simila to Events above and add retryChan <-id
 				//	(actually the new struct with file-name, id, and retry-number)
 				case RQ_MetaBilling, RQ_MetaProgram, RQ_MetaChanMap, RQ_MetaEventMap:
 					for _, entry := range status {
