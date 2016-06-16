@@ -615,9 +615,6 @@ func main() {
 							Filename: eachFile,
 							RetryNum: retryNumber,
 						}
-						//	JobId : jobId
-						//	FileName:
-						//}
 						jobsInProcessChann <- newJob
 					}
 				} else {
@@ -656,7 +653,7 @@ func main() {
 	close(jobsInProcessChann)
 
 	// Done all gouroutines, close the failed jobs listener channel
-	fmt.Println("Initial POST files complete, closing jobs processing channel")
+	fmt.Println("Failed jobs processing complete, closing processing channel")
 	close(failedJobsChan)
 
 	fmt.Println("jobs channel closed")
