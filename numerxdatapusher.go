@@ -108,6 +108,7 @@ type KeyValue struct {
 	key string
 }
 
+// TODO: add mso key to meta - channel map and meta-program whenever the CSV data will have MSO column
 var keyValue = [...]KeyValue{
 	{RQ_Viewership, ""},
 	{RQ_MetaChanMap, "display_channel_number"},
@@ -253,16 +254,6 @@ type JobType struct {
 	RetryNum int
 }
 
-func RetryJob(job JobType) {
-	if job.RetryNum > 0 {
-		job.RetryNum--
-		// TODO - re-POST this file do not just re-check!!!
-		jobsInProcessChann <- job
-	} else {
-		failedJobsChan <- job
-	}
-}
-
 // Check status for a job
 func jobCompleted(job JobType) bool {
 	// Call numerxData server to check the status of this job
@@ -337,12 +328,12 @@ func jobCompleted(job JobType) bool {
 								}
 								return true
 							case string(Failure): // "failure":
-								RetryJob(job)
+								failedJobsChan <- job
 								break
 							}
 						case string(ParsedEventData), string(RawEventData):
 							if entry.Status == string(Failure) {
-								RetryJob(job)
+								failedJobsChan <- job
 								break
 							}
 						}
@@ -368,12 +359,12 @@ func jobCompleted(job JobType) bool {
 								}
 								return true
 							case string(Failure): // "failure":
-								RetryJob(job)
+								failedJobsChan <- job
 								break
 							}
 						case string(ParsedMetaData), string(RawMetaData):
 							if entry.Status == string(Failure) {
-								RetryJob(job)
+								failedJobsChan <- job
 								break
 							}
 						}
@@ -557,10 +548,11 @@ func main() {
 
 			request, err := newfileUploadRequest(baseUrl, string(requestType), extraParams, eachFile)
 			if err != nil {
+				// Wrong parameters/request - do not try again
 				log.Println(err)
 				wg.Done()
 				failedJobsChan <- JobType{
-					JobId:    "",
+					JobId:    err.Error(),
 					Filename: eachFile,
 					RetryNum: -1,
 				}
@@ -579,7 +571,7 @@ func main() {
 				log.Println(err)
 				wg.Done()
 				failedJobsChan <- JobType{
-					JobId:    "",
+					JobId:    err.Error(),
 					Filename: eachFile,
 					RetryNum: -1,
 				}
@@ -617,6 +609,9 @@ func main() {
 						}
 						jobsInProcessChann <- newJob
 					}
+				} else if resp.StatusCode == 500 {
+					// TODO: if 500 - re POST
+
 				} else {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					if verbose {
@@ -678,11 +673,11 @@ type NumerXPOSTResponse struct {
 }
 
 type NumerXStatusResponse struct {
-	ID        string `json:"ID"`
-	Step      string `json:"Step"`
-	Status    string `json:"Status"`
-	Timestamp int    `json:"Timestamp"`
-	Notes     string `json:"Notes"`
+	ID        string `json:"id"`
+	Step      string `json:"step"`
+	Status    string `json:"status"`
+	Timestamp int    `json:"timestamp"`
+	Notes     string `json:"notes"`
 }
 
 // Unmarshal Status response to []NumerXStatusResponse
