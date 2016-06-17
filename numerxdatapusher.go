@@ -251,7 +251,6 @@ const (
 type JobType struct {
 	JobId    string
 	Filename string
-	RetryNum int
 }
 
 // Check status for a job
@@ -555,7 +554,6 @@ func main() {
 				failedJobsChan <- JobType{
 					JobId:    err.Error(),
 					Filename: eachFile,
-					RetryNum: -1,
 				}
 				return
 			}
@@ -573,7 +571,6 @@ func main() {
 				failedJobsChan <- JobType{
 					JobId:    err.Error(),
 					Filename: eachFile,
-					RetryNum: -1,
 				}
 				return
 			} else {
@@ -605,7 +602,6 @@ func main() {
 						newJob := JobType{
 							JobId:    jobId,
 							Filename: eachFile,
-							RetryNum: retryNumber,
 						}
 						jobsInProcessChann <- newJob
 					}
@@ -614,7 +610,6 @@ func main() {
 					failedJobsChan <- JobType{
 						JobId:    "",
 						Filename: eachFile,
-						RetryNum: -1,
 					}
 					return
 				} else {
@@ -625,7 +620,6 @@ func main() {
 					failedJobsChan <- JobType{
 						JobId:    "",
 						Filename: eachFile,
-						RetryNum: -1,
 					}
 					return
 				}
