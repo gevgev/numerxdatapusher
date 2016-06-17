@@ -565,15 +565,31 @@ func main() {
 			}
 
 			client := &http.Client{}
-			resp, err := client.Do(request)
-			if err != nil {
+
+			postRequestSucceeded := false
+			var resp *http.Response
+
+			for attemptNumber := 0; attemptNumber < retryNumber; attemptNumber++ {
+				resp, err = client.Do(request)
+				if err != nil {
+					time.Sleep(timeout)
+					if verbose {
+						fmt.Printf("Attempt # %d for %s\n", attemptNumber+1, eachFile)
+					}
+				} else {
+					postRequestSucceeded = true
+					break
+				}
+			}
+
+			if !postRequestSucceeded {
 				log.Println(err)
 				failedJobsChan <- JobType{
-					JobId:    err.Error(),
+					JobId:    time.Now().String() + ":" + err.Error(),
 					Filename: eachFile,
 				}
-				return
 			} else {
+
 				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
 				defer resp.Body.Close()
 
