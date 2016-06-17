@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -568,7 +569,8 @@ func main() {
 
 			postRequestSucceeded := false
 			var resp *http.Response
-
+			retryNo := retryNumber
+		RETRY_LABEL:
 			for attemptNumber := 0; attemptNumber < retryNumber; attemptNumber++ {
 				resp, err = client.Do(request)
 				if err != nil {
@@ -621,13 +623,24 @@ func main() {
 						}
 						jobsInProcessChann <- newJob
 					}
-				} else if resp.StatusCode == 500 {
-					// TODO: if 500 - re POST
-					failedJobsChan <- JobType{
-						JobId:    "",
-						Filename: eachFile,
+				} else if resp.StatusCode == 500 || resp.StatusCode == 503 {
+					// if 500 or 503 - re POST
+					retryNo--
+					if retryNo <= 0 {
+						failedJobsChan <- JobType{
+							JobId:    "http " + strconv.Itoa(resp.StatusCode),
+							Filename: eachFile,
+						}
+						return
+					} else {
+						resp.Body.Close()
+						time.Sleep(timeout)
+						if verbose {
+							fmt.Printf("Attempt # %d for %s failed.\n", retryNumber-retryNo, eachFile)
+						}
+						goto RETRY_LABEL
 					}
-					return
+
 				} else {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					if verbose {
