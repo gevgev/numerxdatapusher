@@ -30,7 +30,7 @@ func newfileUploadRequest(uri string, resource string, params map[string]string,
 	request, err := http.NewRequest("POST", uri+resource, bytes.NewBuffer([]byte(fileContents)))
 
 	if err != nil {
-		fmt.Println("Could not allocate new request object: ", err)
+		log.Println("Could not allocate new request object: ", err)
 		return nil, err
 	}
 
@@ -218,7 +218,7 @@ func ValidateRQType() bool {
 		fmt.Println("Wrong request type parameter value provided: ", param_RQ_T)
 		fmt.Println("Valid values are:")
 		for _, rq_type := range dataType {
-			fmt.Println(rq_type.RQTypeParam)
+			log.Println(rq_type.RQTypeParam)
 		}
 		return false
 	}
@@ -273,18 +273,20 @@ func jobCompleted(job JobType) bool {
 	request, err := fileUploadStatusRequest(baseUrl, "/status", params)
 	if err != nil {
 		log.Println(err)
+		return false // let the caller func to handle retries
 	}
 
 	if verbose {
-		fmt.Println("RQ URL: ", request.URL)
-		fmt.Println("RQ Headers: ", request.Header)
-		fmt.Println("RQ Body: ", request)
+		log.Println("RQ URL: ", request.URL)
+		log.Println("RQ Headers: ", request.Header)
+		log.Println("RQ Body: ", request)
 	}
 
 	client := &http.Client{}
 	resp, err := client.Do(request)
 	if err != nil {
 		log.Println(err)
+		return false // let the caller func to handle retries
 	} else {
 		/* JSON
 		[
@@ -297,22 +299,23 @@ func jobCompleted(job JobType) bool {
 
 		var bodyContent []byte
 		if verbose {
-			fmt.Println("Status RS Status: ", resp.StatusCode)
-			fmt.Println("Status RS Headers: ", resp.Header)
+			log.Println("Status RS Status: ", resp.StatusCode)
+			log.Println("Status RS Headers: ", resp.Header)
 		}
 
 		bodyContent, err := ioutil.ReadAll(resp.Body)
 
 		if verbose {
-			fmt.Println("Status RS Content: error? :", err)
-			fmt.Println("Status RS Content: body: bytes:  ", bodyContent)
-			fmt.Println("Status RS Content: body: string: ", string(bodyContent))
+			log.Println("Status RS Content: error? :", err)
+			log.Println("Status RS Content: body: bytes:  ", bodyContent)
+			log.Println("Status RS Content: body: string: ", string(bodyContent))
 		}
 		if resp.StatusCode == 200 {
 			// Check the step's status
 			status, err := getStatusResponse(bodyContent)
 			if err != nil {
-				fmt.Printf("Error %v while checking status for %v, file: %v \n", err, job.JobId, job.Filename)
+				log.Printf("Error %v while checking status for %v, file: %v \n", err, job.JobId, job.Filename)
+				return false // let the caller func to handle retries
 			} else {
 				switch requestType {
 				case RQ_Viewership:
@@ -322,9 +325,8 @@ func jobCompleted(job JobType) bool {
 							switch entry.Status {
 							case string(Success): // "success":
 								if verbose {
-									fmt.Println("@", time.Now())
-									fmt.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
-									fmt.Println("Current state: ", status)
+									log.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
+									log.Println("Current state: ", status)
 								}
 								return true
 							case string(Failure): // "failure":
@@ -340,9 +342,8 @@ func jobCompleted(job JobType) bool {
 					}
 
 					if verbose {
-						fmt.Println("@", time.Now())
-						fmt.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
-						fmt.Println("Current state: ", status)
+						log.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
+						log.Println("Current state: ", status)
 					}
 
 				//	(actually the new struct with file-name, id, and retry-number)
@@ -353,9 +354,8 @@ func jobCompleted(job JobType) bool {
 							switch entry.Status {
 							case string(Success): // "success":
 								if verbose {
-									fmt.Println("@", time.Now())
-									fmt.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
-									fmt.Println("Current state: ", status)
+									log.Printf("Complete for: %s, file: %s\n", job.JobId, job.Filename)
+									log.Println("Current state: ", status)
 								}
 								return true
 							case string(Failure): // "failure":
@@ -371,9 +371,8 @@ func jobCompleted(job JobType) bool {
 					}
 
 					if verbose {
-						fmt.Println("@", time.Now())
-						fmt.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
-						fmt.Println("Current state: ", status)
+						log.Printf("Not yet: %s, file: %s\n", job.JobId, job.Filename)
+						log.Println("Current state: ", status)
 					}
 
 				}
@@ -382,7 +381,7 @@ func jobCompleted(job JobType) bool {
 			log.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
 			failedJobsChan <- job
 			if verbose {
-				fmt.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
+				log.Println("Error Status %v while checking status for %v, file: %s \n", err, job.JobId, job.Filename)
 			}
 			return true
 		}
@@ -397,7 +396,7 @@ func waitingForJob(job JobType, wg *sync.WaitGroup) {
 	for {
 		// wait enough...
 		if verbose {
-			fmt.Println("Waiting for ", job.JobId)
+			log.Println("Waiting for ", job.JobId)
 		}
 		time.Sleep(timeout * time.Minute)
 		// Check if the numerx server has completed this job yet
@@ -407,7 +406,6 @@ func waitingForJob(job JobType, wg *sync.WaitGroup) {
 	}
 }
 
-var filesQueueChan chan string
 var jobsInProcessChann chan JobType
 var failedJobsChan chan JobType
 
@@ -469,7 +467,6 @@ func main() {
 	// This is our semaphore/pool
 	sem := make(chan bool, concurrency)
 
-	filesQueueChan = make(chan string, concurrency)
 	jobsInProcessChann = make(chan JobType, concurrency)
 	failedJobsChan = make(chan JobType)
 
@@ -481,19 +478,19 @@ func main() {
 	// Start listening for failed jobs
 	go func() {
 		if verbose {
-			fmt.Println("Ready to start getting Ids to wait for completeion...")
+			log.Println("Ready to start logging failed jobs...")
 		}
 		for {
 			nextFailedJob, more := <-failedJobsChan
 			if more {
 				if verbose {
-					fmt.Println("Got failed job: ", nextFailedJob)
+					log.Println("Got failed job: ", nextFailedJob)
 					failedJobs = append(failedJobs, nextFailedJob)
 					wg.Done()
 				}
 			} else {
 				if verbose {
-					fmt.Println("Got all Failed Jobs, breaking")
+					log.Println("Got all Failed Jobs, breaking")
 				}
 				return
 			}
@@ -503,18 +500,18 @@ func main() {
 	// Start listening for the job Ids
 	go func() {
 		if verbose {
-			fmt.Println("Ready to start getting Ids to wait for completeion...")
+			log.Println("Ready to start getting Ids to wait for completeion...")
 		}
 		for {
 			nextJob, more := <-jobsInProcessChann
 			if more {
 				if verbose {
-					fmt.Println("Starting waiting for: ", nextJob.JobId)
+					log.Println("Starting waiting for: ", nextJob.JobId)
 				}
 				go waitingForJob(nextJob, &wg)
 			} else {
 				if verbose {
-					fmt.Println("Got all Ids, breaking")
+					log.Println("Got all Ids, breaking")
 				}
 				return
 			}
@@ -530,7 +527,7 @@ func main() {
 		// fire one file to be processed in a goroutine
 		wg.Add(1)
 
-		fmt.Println("About to process: ", eachFile)
+		log.Println("About to process: ", eachFile)
 		go func(fileName string) {
 			// Signal end of processing at the end
 			defer func() { <-sem }()
@@ -560,24 +557,24 @@ func main() {
 			}
 
 			if verbose {
-				fmt.Println("POST RQ URL: ", request.URL)
-				fmt.Println("POST RQ Headers: ", request.Header)
-				fmt.Println("POST RQ Body: ", request)
+				log.Println("POST RQ URL: ", request.URL)
+				log.Println("POST RQ Headers: ", request.Header)
+				log.Println("POST RQ Body: ", request)
 			}
 
 			client := &http.Client{}
 
 			postRequestSucceeded := false
 			var resp *http.Response
-			retryNo := retryNumber
+			retryNo := retryNumber // retryNo for http 550/503 Server errors re-tries
 		RETRY_LABEL:
 			for attemptNumber := 0; attemptNumber < retryNumber; attemptNumber++ {
 				resp, err = client.Do(request)
-				if err != nil {
-					time.Sleep(timeout)
+				if err != nil { // timeout re-tries are handled here
 					if verbose {
-						fmt.Printf("Attempt # %d for %s failed.\n", attemptNumber+1, eachFile)
+						log.Printf("Attempt # %d for %s failed.\n", attemptNumber+1, eachFile)
 					}
+					time.Sleep(timeout)
 				} else {
 					postRequestSucceeded = true
 					break
@@ -590,31 +587,32 @@ func main() {
 					JobId:    time.Now().String() + ":" + err.Error(),
 					Filename: eachFile,
 				}
+				return
 			} else {
 
 				// JSON {"id" : "0.0.LqO~iOvJV3sdUOd8"}
 				defer resp.Body.Close()
 
 				if verbose {
-					fmt.Println("POST Status code: ", resp.StatusCode)
-					fmt.Println("POST Headers: ", resp.Header)
+					log.Println("POST Status code: ", resp.StatusCode)
+					log.Println("POST Headers: ", resp.Header)
 				}
 				bodyContent, err := ioutil.ReadAll(resp.Body)
 
 				if verbose {
-					fmt.Printf("POST - File:[%s] Response body: %s\n", eachFile, string(bodyContent))
-					fmt.Println("POST - Status RS Content: error? :", err)
-					fmt.Println("POST - Status RS Content: body: ", bodyContent)
+					log.Printf("POST - File:[%s] Response body: %s\n", eachFile, string(bodyContent))
+					log.Println("POST - Status RS Content: error? :", err)
+					log.Println("POST - Status RS Content: body: ", bodyContent)
 				}
 				if resp.StatusCode == 200 {
 					// get the id of the job on numerX server
 					// sent this Id to the StatusChecker channel
 					jobId, err := GetJobId(bodyContent)
 					if err != nil {
-						fmt.Printf("Error [%v] for submitting %v \n", err, eachFile)
+						log.Printf("Error [%v] for submitting %v \n", err, eachFile)
 					} else {
 						if verbose {
-							fmt.Printf("Posted file [%s] with Id {%s}, about to start checking on status update\n", eachFile, jobId)
+							log.Printf("Posted file [%s] with Id {%s}, about to start checking on status update\n", eachFile, jobId)
 						}
 
 						newJob := JobType{
@@ -634,17 +632,17 @@ func main() {
 						return
 					} else {
 						resp.Body.Close()
-						time.Sleep(timeout)
 						if verbose {
-							fmt.Printf("Attempt # %d for %s failed.\n", retryNumber-retryNo, eachFile)
+							log.Printf("Attempt # %d for %s failed.\n", retryNumber-retryNo, eachFile)
 						}
+						time.Sleep(timeout)
 						goto RETRY_LABEL
 					}
 
-				} else {
+				} else { // all other HTTP response codes
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					if verbose {
-						fmt.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
+						log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
 					}
 					failedJobsChan <- JobType{
 						JobId:    "",
@@ -659,7 +657,7 @@ func main() {
 
 	// waiting for all goroutines to end
 	if verbose {
-		fmt.Println("Waiting for all goroutines to complete the work")
+		log.Println("Waiting for all goroutines to complete the work")
 	}
 
 	for i := 0; i < cap(sem); i++ {
@@ -667,31 +665,31 @@ func main() {
 	}
 
 	// Now waiting for status-waiter processes to end
-	fmt.Println("Waiting for all status checks to complete")
+	log.Println("Waiting for all status checks to complete")
 	wg.Wait()
 
 	// Done all gouroutines, close the jobs listener channel
-	fmt.Println("Initial POST files complete, closing jobs processing channel")
+	log.Println("Initial POST files complete, closing jobs processing channel")
 	close(jobsInProcessChann)
 
 	// Done all gouroutines, close the failed jobs listener channel
-	fmt.Println("Failed jobs processing complete, closing processing channel")
+	log.Println("Failed jobs processing complete, closing processing channel")
 	close(failedJobsChan)
 
-	fmt.Println("jobs channel closed")
+	log.Println("jobs channel closed")
 
-	fmt.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
+	log.Printf("Processed %d files, in %v\n", len(files), time.Since(startTime))
 
 	if len(failedJobs) > 0 {
 		PrintFailedJobs(failedJobs)
 	} else {
-		fmt.Println("No failed jobs reported")
+		log.Println("No failed jobs reported")
 	}
 }
 
 func PrintFailedJobs(failedJobs []JobType) {
 	for _, job := range failedJobs {
-		fmt.Printf("Failed job: [%s], file: %s\n", job.JobId, job.Filename)
+		log.Printf("Failed job: [%s], file: %s\n", job.JobId, job.Filename)
 	}
 }
 
@@ -711,8 +709,8 @@ type NumerXStatusResponse struct {
 func getStatusResponse(bodyContent []byte) ([]NumerXStatusResponse, error) {
 	var response []NumerXStatusResponse
 	if verbose {
-		fmt.Println("Status response: Bytes:  ", bodyContent)
-		fmt.Println("Status response: String: ", string(bodyContent))
+		log.Println("Status response: Bytes:  ", bodyContent)
+		log.Println("Status response: String: ", string(bodyContent))
 	}
 	err := json.Unmarshal(bodyContent, &response)
 	if err != nil {
@@ -725,19 +723,16 @@ func getStatusResponse(bodyContent []byte) ([]NumerXStatusResponse, error) {
 func GetJobId(bodyContent []byte) (string, error) {
 	var response NumerXPOSTResponse
 	if verbose {
-		fmt.Println("Post response: Bytes:  ", bodyContent)
-		fmt.Println("Post response: String: ", string(bodyContent))
+		log.Println("Post response: Bytes:  ", bodyContent)
+		log.Println("Post response: String: ", string(bodyContent))
 	}
 	err := json.Unmarshal(bodyContent, &response)
 	if err != nil {
 		return "", err
 	}
 
-	//	if len(response) == 0 {
-	//		return "", errors.New("No Id found in response")
-	//	}
 	if verbose {
-		fmt.Println("Post response: Id: ", response.Id)
+		log.Println("Post response: Id: ", response.Id)
 	}
 	return response.Id, nil
 }
@@ -756,7 +751,7 @@ func getFilesToProcess() []string {
 			return fileList
 		} else {
 			// no Dir name, no file name
-			fmt.Println("Input file name or working directory is not provided")
+			log.Println("Input file name or working directory is not provided")
 			usage()
 		}
 	}
@@ -770,7 +765,7 @@ func getFilesToProcess() []string {
 	})
 
 	if err != nil {
-		fmt.Println("Error getting files list: ", err)
+		log.Println("Error getting files list: ", err)
 		os.Exit(-1)
 	}
 
