@@ -574,7 +574,7 @@ func main() {
 				if err != nil {
 					time.Sleep(timeout)
 					if verbose {
-						fmt.Printf("Attempt # %d for %s\n", attemptNumber+1, eachFile)
+						fmt.Printf("Attempt # %d for %s failed.\n", attemptNumber+1, eachFile)
 					}
 				} else {
 					postRequestSucceeded = true
