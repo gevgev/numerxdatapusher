@@ -489,6 +489,7 @@ func main() {
 				if verbose {
 					fmt.Println("Got failed job: ", nextFailedJob)
 					failedJobs = append(failedJobs, nextFailedJob)
+					wg.Done()
 				}
 			} else {
 				if verbose {
@@ -551,7 +552,6 @@ func main() {
 			if err != nil {
 				// Wrong parameters/request - do not try again
 				log.Println(err)
-				wg.Done()
 				failedJobsChan <- JobType{
 					JobId:    err.Error(),
 					Filename: eachFile,
@@ -570,7 +570,6 @@ func main() {
 			resp, err := client.Do(request)
 			if err != nil {
 				log.Println(err)
-				wg.Done()
 				failedJobsChan <- JobType{
 					JobId:    err.Error(),
 					Filename: eachFile,
@@ -617,7 +616,6 @@ func main() {
 						Filename: eachFile,
 						RetryNum: -1,
 					}
-					wg.Done()
 					return
 				} else {
 					log.Println("Error Status [%v] for submitting %v \n", err, string(bodyContent))
@@ -629,7 +627,6 @@ func main() {
 						Filename: eachFile,
 						RetryNum: -1,
 					}
-					wg.Done()
 					return
 				}
 			}
