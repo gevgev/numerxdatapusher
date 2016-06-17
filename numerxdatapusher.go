@@ -566,7 +566,7 @@ func main() {
 
 			postRequestSucceeded := false
 			var resp *http.Response
-			retryNo := retryNumber // retryNo for http 550/503 Server errors re-tries
+			retryNo := retryNumber // retryNo for http 500 Server errors re-tries
 		RETRY_LABEL:
 			for attemptNumber := 0; attemptNumber < retryNumber; attemptNumber++ {
 				resp, err = client.Do(request)
@@ -621,8 +621,8 @@ func main() {
 						}
 						jobsInProcessChann <- newJob
 					}
-				} else if resp.StatusCode == 500 || resp.StatusCode == 503 {
-					// if 500 or 503 - re POST
+				} else if resp.StatusCode == 500 {
+					// if 500 - re POST
 					retryNo--
 					if retryNo <= 0 {
 						failedJobsChan <- JobType{
